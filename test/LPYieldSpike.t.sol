@@ -32,44 +32,27 @@ contract TestPointsHook is Test, Deployers {
 
     function setUp() public {
         deployFreshManagerAndRouters();
-        
+
         deployMintAndApprove2Currencies();
 
         uint24 initialPoolFee = 500;
         uint24 feePercentageForPrize = 500;
 
-
         // Deploy our hook
-        hook = PointsHook(address(
-            uint160(
-                Hooks.BEFORE_INITIALIZE_FLAG | 
-                Hooks.AFTER_INITIALIZE_FLAG | 
-                Hooks.BEFORE_SWAP_FLAG
-                )
-            )
+        hook = PointsHook(
+            address(uint160(Hooks.BEFORE_INITIALIZE_FLAG | Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG))
         );
 
         vm.txGasPrice(10 gwei);
 
-
-        deployCodeTo(
-            "LPYieldSpike.sol",
-            abi.encode(manager, "Points Token", "TEST_POINTS"),
-            address(flags)
-        );
+        deployCodeTo("LPYieldSpike.sol", abi.encode(manager, "Points Token", "TEST_POINTS"), address(flags));
 
         // Approve our TOKEN for spending on the swap router and modify liquidity router
         // These variables are coming from the `Deployers` contract
         token.approve(address(swapRouter), type(uint256).max);
         token.approve(address(modifyLiquidityRouter), type(uint256).max);
 
-        (key, ) = initPool(
-            ethCurrency,
-            tokenCurrency,
-            hook,
-            3000,
-            SQRT_PRICE_1_1
-        );
+        (key,) = initPool(ethCurrency, tokenCurrency, hook, 3000, SQRT_PRICE_1_1);
     }
 
     function test_addLiquidityAndSwap() public {
@@ -88,12 +71,8 @@ contract TestPointsHook is Test, Deployers {
         uint160 sqrtPriceAtTickLower = TickMath.getSqrtPriceAtTick(-60);
         uint160 sqrtPriceAtTickUpper = TickMath.getSqrtPriceAtTick(60);
 
-        (uint256 amount0Delta, uint256 amount1Delta) = LiquidityAmounts.getAmountsForLiquidity(
-            SQRT_PRICE_1_1,
-            sqrtPriceAtTickLower,
-            sqrtPriceAtTickUpper,
-            1 ether
-        );
+        (uint256 amount0Delta, uint256 amount1Delta) =
+            LiquidityAmounts.getAmountsForLiquidity(SQRT_PRICE_1_1, sqrtPriceAtTickLower, sqrtPriceAtTickUpper, 1 ether);
 
         modifyLiquidityRouter.modifyLiquidity{value: amount0Delta + 1}(
             key,
@@ -129,16 +108,13 @@ contract TestPointsHook is Test, Deployers {
                 amountSpecified: -0.001 ether,
                 sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
             }),
-            PoolSwapTest.TestSettings({
-                takeClaims: false,
-                settleUsingBurn: false
-            }),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             hookData
         );
 
         uint256 pointsBalanceAfterSwap = hook.balanceOf(address(this));
 
-        assertEq(pointsBalanceAfterSwap - pointsBalanceAfterAddLiquidity, 2 * 10**14);
+        assertEq(pointsBalanceAfterSwap - pointsBalanceAfterAddLiquidity, 2 * 10 ** 14);
     }
 
     function test_addLiquidityAndSwapWithReferral() public {
@@ -146,25 +122,20 @@ contract TestPointsHook is Test, Deployers {
 
         uint256 pointsBalanceOriginal = hook.balanceOf(address(this));
         uint256 referrerPointsBalanceOriginal = hook.balanceOf(address(1));
-    
+
         // amount0Delta = ~0.003 ETH
         // How we landed on 0.003 ether here is based on computing value of x and y given
         // total value of delta L (liquidity delta) = 1 ether
         // This is done by computing x and y from the equation shown in Ticks and Q64.96 Numbers lesson
         // View the full code for this lesson on GitHub which has additional comments
         // showing the exact computation and a Python script to do that calculation for you
-    
+
         uint160 sqrtPriceAtTickLower = TickMath.getSqrtPriceAtTick(-60);
         uint160 sqrtPriceAtTickUpper = TickMath.getSqrtPriceAtTick(60);
-    
-        (uint256 amount0Delta, uint256 amount1Delta) = LiquidityAmounts
-            .getAmountsForLiquidity(
-                SQRT_PRICE_1_1,
-                sqrtPriceAtTickLower,
-                sqrtPriceAtTickUpper,
-                1 ether
-            );
-    
+
+        (uint256 amount0Delta, uint256 amount1Delta) =
+            LiquidityAmounts.getAmountsForLiquidity(SQRT_PRICE_1_1, sqrtPriceAtTickLower, sqrtPriceAtTickUpper, 1 ether);
+
         modifyLiquidityRouter.modifyLiquidity{value: amount0Delta + 1}(
             key,
             IPoolManager.ModifyLiquidityParams({
@@ -175,25 +146,17 @@ contract TestPointsHook is Test, Deployers {
             }),
             hookData
         );
-    
+
         uint256 pointsBalanceAfterAddLiquidity = hook.balanceOf(address(this));
-        uint256 referrerPointsBalanceAfterAddLiquidity = hook.balanceOf(
-            address(1)
-        );
-    
+        uint256 referrerPointsBalanceAfterAddLiquidity = hook.balanceOf(address(1));
+
+        assertApproxEqAbs(pointsBalanceAfterAddLiquidity - pointsBalanceOriginal, 2995354955910434, 0.00001 ether);
         assertApproxEqAbs(
-            pointsBalanceAfterAddLiquidity - pointsBalanceOriginal,
-            2995354955910434,
-            0.00001 ether
-        );
-        assertApproxEqAbs(
-            referrerPointsBalanceAfterAddLiquidity -
-                referrerPointsBalanceOriginal -
-                hook.POINTS_FOR_REFERRAL(),
+            referrerPointsBalanceAfterAddLiquidity - referrerPointsBalanceOriginal - hook.POINTS_FOR_REFERRAL(),
             299535495591043,
             0.000001 ether
         );
-    
+
         // Now we swap
         // We will swap 0.001 ether for tokens
         // We should get 20% of 0.001 * 10**18 points
@@ -206,24 +169,13 @@ contract TestPointsHook is Test, Deployers {
                 amountSpecified: -0.001 ether,
                 sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
             }),
-            PoolSwapTest.TestSettings({
-                takeClaims: false,
-                settleUsingBurn: false
-            }),
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
             hookData
         );
         uint256 pointsBalanceAfterSwap = hook.balanceOf(address(this));
         uint256 referrerPointsBalanceAfterSwap = hook.balanceOf(address(1));
-    
-        assertEq(
-            pointsBalanceAfterSwap - pointsBalanceAfterAddLiquidity,
-            2 * 10 ** 14
-        );
-        assertEq(
-            referrerPointsBalanceAfterSwap -
-                referrerPointsBalanceAfterAddLiquidity,
-            2 * 10 ** 13
-        );
-    }
 
+        assertEq(pointsBalanceAfterSwap - pointsBalanceAfterAddLiquidity, 2 * 10 ** 14);
+        assertEq(referrerPointsBalanceAfterSwap - referrerPointsBalanceAfterAddLiquidity, 2 * 10 ** 13);
+    }
 }
