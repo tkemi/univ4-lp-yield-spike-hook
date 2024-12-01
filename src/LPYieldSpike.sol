@@ -50,6 +50,9 @@ contract LPYieldSpike is BaseHook {
 
     // Initial fee of the pool
     uint24 public initialPoolFee; // 500 = 5%
+    
+    // Base pool fee, reduced to allocate portion for prize mechanism
+    uint24 public reducedPoolFee; 
 
     // Percentage of fee to be allocated for prize
     uint24 public feePercentageForPrize;
@@ -94,11 +97,8 @@ contract LPYieldSpike is BaseHook {
         return this.beforeInitialize.selector;
     }
 
-    function afterInitialize(address, PoolKey calldata key, uint160, int24) external override returns (bytes4) {
-        // Reduce initial pool fee to later use that difference to accumulate prizes
-        uint24 reducedFee = initialPoolFee - feePercentageForPrize;
-        // Set reducedFee as the initial poolFee
-        poolManager.updateDynamicLPFee(key, reducedFee);
+    function afterInitialize(address, PoolKey calldata , uint160, int24) external override returns (bytes4) {
+        calculateAndSetReducedFee(initialPoolFee);
 
         return this.afterInitialize.selector;
     }
@@ -138,7 +138,13 @@ contract LPYieldSpike is BaseHook {
         onlyPoolManager
         returns (bytes4, BeforeSwapDelta, uint24)
     {
-        // Calculate the portion of the swap amount to be allocated to the prize pool
+        // Check if pool lp has changed and update new values to match hook requirements
+        (, , ,uint24 currentLpFee ) = poolManager.getSlot0(key.toId());
+        uint24 newPoolFee;
+        if (currentLpFee != reducedPoolFee) {
+            newPoolFee = calculateAndSetReducedFee(currentLpFee);
+        }
+         // Calculate the portion of the swap amount to be allocated to the prize pool
         // Using feePercentageForPrize (e.g., 500 = 5%) and dividing by 10000 for precision
         int256 amountToAccumulateToPrize = (params.amountSpecified * int256(uint256(feePercentageForPrize))) / 10000;
 
@@ -165,7 +171,16 @@ contract LPYieldSpike is BaseHook {
         IERC20(feeCurrency).safeTransferFrom(msg.sender, address(this), uint256(absAmountToAccumulate));
 
         // Return the hook selector, zero delta (no modification to swap), and zero additional data
-        return (this.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
+        return (this.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, newPoolFee);
+    }
+
+    function calculateAndSetReducedFee(uint24 feeToBeReduced) internal returns(uint24) {
+        // Reduce initial pool fee to later use that difference to accumulate prizes
+        reducedPoolFee = feeToBeReduced - feePercentageForPrize;
+        // Set reducedFee as the  poolFee
+        reducedPoolFee = reducedPoolFee | LPFeeLibrary.OVERRIDE_FEE_FLAG;
+
+        return reducedPoolFee;
     }
 
     // Add a setter for bps taken from the fee
