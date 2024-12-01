@@ -50,9 +50,9 @@ contract LPYieldSpike is BaseHook {
 
     // Initial fee of the pool
     uint24 public initialPoolFee; // 500 = 5%
-    
+
     // Base pool fee, reduced to allocate portion for prize mechanism
-    uint24 public reducedPoolFee; 
+    uint24 public reducedPoolFee;
 
     // Percentage of fee to be allocated for prize
     uint24 public feePercentageForPrize;
@@ -97,7 +97,7 @@ contract LPYieldSpike is BaseHook {
         return this.beforeInitialize.selector;
     }
 
-    function afterInitialize(address, PoolKey calldata , uint160, int24) external override returns (bytes4) {
+    function afterInitialize(address, PoolKey calldata, uint160, int24) external override returns (bytes4) {
         calculateAndSetReducedFee(initialPoolFee);
 
         return this.afterInitialize.selector;
@@ -139,12 +139,12 @@ contract LPYieldSpike is BaseHook {
         returns (bytes4, BeforeSwapDelta, uint24)
     {
         // Check if pool lp has changed and update new values to match hook requirements
-        (, , ,uint24 currentLpFee ) = poolManager.getSlot0(key.toId());
+        (,,, uint24 currentLpFee) = poolManager.getSlot0(key.toId());
         uint24 newPoolFee;
         if (currentLpFee != reducedPoolFee) {
             newPoolFee = calculateAndSetReducedFee(currentLpFee);
         }
-         // Calculate the portion of the swap amount to be allocated to the prize pool
+        // Calculate the portion of the swap amount to be allocated to the prize pool
         // Using feePercentageForPrize (e.g., 500 = 5%) and dividing by 10000 for precision
         int256 amountToAccumulateToPrize = (params.amountSpecified * int256(uint256(feePercentageForPrize))) / 10000;
 
@@ -174,7 +174,7 @@ contract LPYieldSpike is BaseHook {
         return (this.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, newPoolFee);
     }
 
-    function calculateAndSetReducedFee(uint24 feeToBeReduced) internal returns(uint24) {
+    function calculateAndSetReducedFee(uint24 feeToBeReduced) internal returns (uint24) {
         // Reduce initial pool fee to later use that difference to accumulate prizes
         reducedPoolFee = feeToBeReduced - feePercentageForPrize;
         // Set reducedFee as the  poolFee

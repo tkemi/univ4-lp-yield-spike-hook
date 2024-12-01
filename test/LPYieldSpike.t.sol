@@ -40,7 +40,8 @@ contract TestLPYieldHook is Test, Deployers {
         uint24 feePercentageForPrize = 500;
 
         // Deploy our hook
-        address hookAddress = address(uint160(Hooks.BEFORE_INITIALIZE_FLAG | Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG));
+        address hookAddress =
+            address(uint160(Hooks.BEFORE_INITIALIZE_FLAG | Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG));
 
         vm.txGasPrice(10 gwei);
 
@@ -58,9 +59,7 @@ contract TestLPYieldHook is Test, Deployers {
         );
     }
 
-    function test_a() public {
-
-    }
+    function test_a() public {}
 
     // function test_addLiquidityAndSwap() public {
     //     // Set no referrer in the hook data
