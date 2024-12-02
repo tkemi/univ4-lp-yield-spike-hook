@@ -46,7 +46,9 @@ contract LPYieldSpike is BaseHook {
     uint256 public lastPrizeDrawTimestamp;
 
     // Draw prize winner every 86400 seconds (24 hours)
-    uint256 public constant prizeDrawInterval = 86400;
+    uint256 public constant PRIZE_DRAW_INTERVAL = 86400;
+
+    uint24 public constant FEE_PRECISION = 10000;
 
     // Initial fee of the pool
     uint24 public initialPoolFee; // 500 = 5%
@@ -62,14 +64,16 @@ contract LPYieldSpike is BaseHook {
 
     error MustUseDynamicFee();
 
-    /// @param _manager Address of poolManager
+    /// @param _poolManager Address of poolManager
     /// @param _initialPoolFee Initial pool fee
     /// @param _feePercentageForPrize Fee percentage to be taken from fee to accumulate prize (e.g. 500 = 5%)
-    constructor(IPoolManager _manager, uint24 _initialPoolFee, uint24 _feePercentageForPrize) BaseHook(_manager) {
+    constructor(IPoolManager _poolManager, uint24 _initialPoolFee, uint24 _feePercentageForPrize)
+        BaseHook(_poolManager)
+    {
         // Set initial pool fee in bps
         initialPoolFee = _initialPoolFee;
         // Calulate fee percentage in bps to be taken from fee
-        feePercentageForPrize = (initialPoolFee * _feePercentageForPrize) / 10000;
+        feePercentageForPrize = (initialPoolFee * _feePercentageForPrize) / FEE_PRECISION;
     }
 
     // BaseHook functions
@@ -97,40 +101,11 @@ contract LPYieldSpike is BaseHook {
         return this.beforeInitialize.selector;
     }
 
-    function afterInitialize(address, PoolKey calldata, uint160, int24) external override returns (bytes4) {
-        calculateAndSetReducedFee(initialPoolFee);
+    function afterInitialize(address, PoolKey calldata key, uint160, int24) external override returns (bytes4) {
+        poolManager.updateDynamicLPFee(key, initialPoolFee);
 
         return this.afterInitialize.selector;
     }
-
-    // function beforeSwap(address sender, PoolKey calldata key, IPoolManager.SwapParams calldata params, bytes calldata)
-    //     external
-    //     override
-    //     onlyPoolManager
-    //     returns (bytes4, BeforeSwapDelta, uint24)
-    // {
-    //     // Decide if we want to take a part from whole fees(e.g. protocolFee + lpFee) or just lpFee,
-    //     // I think that it should be taken from the whole fees because this incentivizes lps and
-    //     // protocol also benefit from it by getting more lps with this kind of incentive
-
-    //     // Calculate the amount being taken from swap to add to prize
-    //     int256 amountToAccumulateToPrize = (params.amountSpecified * int256(uint256(feePercentageForPrize))) / 10000;
-    //     int256 absAmountToAccumulate = amountToAccumulateToPrize > 0 ? amountToAccumulateToPrize : -amountToAccumulateToPrize;
-
-    //     // Determine the specified currency. If amountSpecified < 0, the swap is exact-in
-    //     // so the feeCurrency should be the token the swapper is selling.
-    //     // If amountSpecified > 0, the swap is exact-out and it's the bought token.
-    //     bool exactOut = params.amountSpecified > 0;
-    //     address feeCurrency = exactOut != params.zeroForOne ? Currency.unwrap(key.currency0) : Currency.unwrap(key.currency1);
-
-    //     // Update accumulated fees of pool per token
-    //     accumulatedPrize[key.toId()][feeCurrency] += uint256(absAmountToAccumulate);
-    //     // Depending on direction of swap, we select the proper input token
-    //     // and request a transfer of those tokens to the hook contract
-    //     IERC20(feeCurrency).safeTransferFrom(msg.sender, address(this), uint256(absAmountToAccumulate));
-
-    //     return (this.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
-    // }
 
     function beforeSwap(address sender, PoolKey calldata key, IPoolManager.SwapParams calldata params, bytes calldata)
         external
@@ -138,40 +113,20 @@ contract LPYieldSpike is BaseHook {
         onlyPoolManager
         returns (bytes4, BeforeSwapDelta, uint24)
     {
-        // Check if pool lp has changed and update new values to match hook requirements
-        (,,, uint24 currentLpFee) = poolManager.getSlot0(key.toId());
-        uint24 newPoolFee;
-        if (currentLpFee != reducedPoolFee) {
-            newPoolFee = calculateAndSetReducedFee(currentLpFee);
-        }
-        // Calculate the portion of the swap amount to be allocated to the prize pool
-        // Using feePercentageForPrize (e.g., 500 = 5%) and dividing by 10000 for precision
-        int256 amountToAccumulateToPrize = (params.amountSpecified * int256(uint256(feePercentageForPrize))) / 10000;
-
-        // Get the absolute value of the amount to accumulate to handle both positive and negative swap amounts
-        int256 absAmountToAccumulate =
-            amountToAccumulateToPrize > 0 ? amountToAccumulateToPrize : -amountToAccumulateToPrize;
-
-        // Determine if the swap is exact-out (user specifies output amount)
-        // This affects how we determine which token is used for fees
-        bool exactOut = params.amountSpecified > 0;
-
-        // Select the fee currency based on swap direction:
-        // - If not exact-out and zeroForOne, use currency1
-        // - If exact-out and not zeroForOne, use currency0
-        // This ensures we always take fees in the correct token
-        address feeCurrency =
-            exactOut != params.zeroForOne ? Currency.unwrap(key.currency0) : Currency.unwrap(key.currency1);
-
-        // Accumulate the prize amount for this specific pool and currency
-        accumulatedPrize[key.toId()][feeCurrency] += uint256(absAmountToAccumulate);
-
-        // Transfer the accumulated prize amount from the swapper to the hook contract
-        // This ensures the prize pool receives the allocated fees immediately
-        IERC20(feeCurrency).safeTransferFrom(msg.sender, address(this), uint256(absAmountToAccumulate));
-
+        // Check if there was a change in pool fee and update fee to match hook requirements
+        uint24 updatedPoolFee = handlePoolFeeUpdate(key);
+        // Accumulate prize for draw
+        accumulatePrize(key, params);
         // Return the hook selector, zero delta (no modification to swap), and zero additional data
-        return (this.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, newPoolFee);
+        return (this.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, updatedPoolFee);
+    }
+
+    function handlePoolFeeUpdate(PoolKey calldata key) internal returns (uint24) {
+        (,,, uint24 currentLpFee) = poolManager.getSlot0(key.toId());
+        if (currentLpFee != reducedPoolFee) {
+            return calculateAndSetReducedFee(currentLpFee);
+        }
+        return currentLpFee;
     }
 
     function calculateAndSetReducedFee(uint24 feeToBeReduced) internal returns (uint24) {
@@ -183,7 +138,15 @@ contract LPYieldSpike is BaseHook {
         return reducedPoolFee;
     }
 
-    // Add a setter for bps taken from the fee
-    // Add a setter to update pool fee, this can be done in one setter
-    // Maybe not because it then needs to be ownable
+    function accumulatePrize(PoolKey calldata key, IPoolManager.SwapParams calldata params) internal {
+        // Get the absolute value of the amountSpecified
+        uint256 amountSpecified =
+            params.amountSpecified < 0 ? uint256(-params.amountSpecified) : uint256(params.amountSpecified);
+        // Calculate the portion of the swap amount to be allocated to the prize pool
+        uint256 amountToAccumulateToPrize = (amountSpecified * feePercentageForPrize) / FEE_PRECISION;
+        // Select the fee currency based on swap direction
+        Currency feeCurrency = params.zeroForOne ? key.currency0 : key.currency1;
+        // Transfer the accumulated prize amount from the swapper to the hook contract
+        poolManager.take(feeCurrency, address(this), amountToAccumulateToPrize);
+    }
 }

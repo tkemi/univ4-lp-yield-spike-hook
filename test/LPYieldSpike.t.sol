@@ -59,7 +59,29 @@ contract TestLPYieldHook is Test, Deployers {
         );
     }
 
-    function test_a() public {}
+    function test_initialFee() public {
+        (,,, uint24 fee) = manager.getSlot0(poolId);
+        assertEq(fee, 3000);
+    }
+
+    function test_a() public {
+        // Set up our swap parameters
+        PoolSwapTest.TestSettings memory testSettings =
+            PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false});
+
+        IPoolManager.SwapParams memory params = IPoolManager.SwapParams({
+            zeroForOne: true,
+            amountSpecified: -0.00001 ether,
+            sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
+        });
+
+        uint256 balanceOfToken1Before = currency1.balanceOfSelf();
+        swapRouter.swap(key, params, testSettings, ZERO_BYTES);
+        uint256 balanceOfToken1After = currency1.balanceOfSelf();
+        uint256 outputFromBaseFeeSwap = balanceOfToken1After - balanceOfToken1Before;
+
+        assertGt(balanceOfToken1After, balanceOfToken1Before);
+    }
 
     // function test_addLiquidityAndSwap() public {
     //     // Set no referrer in the hook data
