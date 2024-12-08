@@ -7,11 +7,14 @@ import {Deployers} from "@uniswap/v4-core/test/utils/Deployers.sol";
 import {PoolSwapTest} from "v4-core/test/PoolSwapTest.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 
+import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
+import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {PoolManager} from "v4-core/PoolManager.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 
 import {Currency, CurrencyLibrary} from "v4-core/types/Currency.sol";
 import {LPFeeLibrary} from "v4-core/libraries/LPFeeLibrary.sol";
+import {StateLibrary} from "v4-core/libraries/StateLibrary.sol";
 
 import {Hooks} from "v4-core/libraries/Hooks.sol";
 import {TickMath} from "v4-core/libraries/TickMath.sol";
@@ -22,12 +25,17 @@ import {console} from "forge-std/console.sol";
 import {LPYieldSpike} from "../src/LPYieldSpike.sol";
 
 contract TestLPYieldHook is Test, Deployers {
+    using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
+    using StateLibrary for IPoolManager;
 
     MockERC20 token;
 
     Currency ethCurrency = Currency.wrap(address(0));
     Currency tokenCurrency;
+
+    uint24 initialPoolFee = 500;
+    uint24 feePercentageForPrize = 500;
 
     LPYieldSpike hook;
 
@@ -35,9 +43,6 @@ contract TestLPYieldHook is Test, Deployers {
         deployFreshManagerAndRouters();
 
         deployMintAndApprove2Currencies();
-
-        uint24 initialPoolFee = 500;
-        uint24 feePercentageForPrize = 500;
 
         // Deploy our hook
         address hookAddress =
@@ -54,14 +59,41 @@ contract TestLPYieldHook is Test, Deployers {
         // Add liquidity to the pool
         modifyLiquidityRouter.modifyLiquidity(
             key,
-            IPoolManager.ModifyLiquidityParams({tickLower: -60, tickUpper: 60, liquidityDelta: 100e18, salt: bytes32(0)}),
+            IPoolManager.ModifyLiquidityParams({
+                tickLower: -60,
+                tickUpper: 60,
+                liquidityDelta: 100 ether,
+                salt: bytes32(0)
+            }),
             ZERO_BYTES
         );
     }
 
-    function test_initialFee() public {
-        (,,, uint24 fee) = manager.getSlot0(poolId);
-        assertEq(fee, 3000);
+    function test_initialFee() public view {
+        (,,, uint24 fee) = manager.getSlot0(key.toId());
+        assertEq(fee, initialPoolFee);
+    }
+
+    // Swap with an updated fee and verify the output
+    function test_updatedFeeBeforeSwap() public {
+        // uint24 newPoolFee = 300;
+        // // update the LP fee, and verify the fee is updated
+        // hook.forceUpdateLPFee(key, newPoolFee);
+        // (,,, uint24 fee) = manager.getSlot0(key.toId());
+        // assertEq(fee, newPoolFee);
+
+        // uint256 currency1Before = currency1.balanceOfSelf();
+
+        // // Perform a test swap //
+        // bool zeroForOne = true;
+        // int256 amountSpecified = -1e18; // negative number indicates exact input swap!
+        // BalanceDelta swapDelta = swap(key, zeroForOne, amountSpecified, ZERO_BYTES);
+        // // ------------------- //
+
+        // uint256 currency1After = currency1.balanceOfSelf();
+
+        // // the fee is 0.20% so we should receive approximately 0.9980 of currency1
+        // assertApproxEqAbs(currency1After - currency1Before, 0.998e18, 0.0001 ether);
     }
 
     function test_a() public {
@@ -78,132 +110,8 @@ contract TestLPYieldHook is Test, Deployers {
         uint256 balanceOfToken1Before = currency1.balanceOfSelf();
         swapRouter.swap(key, params, testSettings, ZERO_BYTES);
         uint256 balanceOfToken1After = currency1.balanceOfSelf();
-        uint256 outputFromBaseFeeSwap = balanceOfToken1After - balanceOfToken1Before;
+        // uint256 outputFromBaseFeeSwap = balanceOfToken1After - balanceOfToken1Before;
 
         assertGt(balanceOfToken1After, balanceOfToken1Before);
     }
-
-    // function test_addLiquidityAndSwap() public {
-    //     // Set no referrer in the hook data
-    //     bytes memory hookData = abi.encode(address(0), address(this));
-
-    //     uint256 pointsBalanceOriginal = hook.balanceOf(address(this));
-
-    //     // amount0Delta = ~0.003 ETH
-    //     // How we landed on 0.003 ether here is based on computing value of x and y given
-    //     // total value of delta L (liquidity delta) = 1 ether
-    //     // This is done by computing x and y from the equation shown in Ticks and Q64.96 Numbers lesson
-    //     // View the full code for this lesson on GitHub which has additional comments
-    //     // showing the exact computation and a Python script to do that calculation for you
-
-    //     uint160 sqrtPriceAtTickLower = TickMath.getSqrtPriceAtTick(-60);
-    //     uint160 sqrtPriceAtTickUpper = TickMath.getSqrtPriceAtTick(60);
-
-    //     (uint256 amount0Delta, uint256 amount1Delta) =
-    //         LiquidityAmounts.getAmountsForLiquidity(SQRT_PRICE_1_1, sqrtPriceAtTickLower, sqrtPriceAtTickUpper, 1 ether);
-
-    //     modifyLiquidityRouter.modifyLiquidity{value: amount0Delta + 1}(
-    //         key,
-    //         IPoolManager.ModifyLiquidityParams({
-    //             tickLower: -60,
-    //             tickUpper: 60,
-    //             liquidityDelta: 1 ether,
-    //             salt: bytes32(0)
-    //         }),
-    //         hookData
-    //     );
-
-    //     uint256 pointsBalanceAfterAddLiquidity = hook.balanceOf(address(this));
-
-    //     // The exact amount of ETH we're adding (x)
-    //     // is roughly 0.299535... ETH
-    //     // Our original POINTS balance was 0
-    //     // so after adding liquidity we should have roughly 0.299535... POINTS tokens
-    //     assertApproxEqAbs(
-    //         pointsBalanceAfterAddLiquidity - pointsBalanceOriginal,
-    //         2995354955910434,
-    //         0.0001 ether // error margin for precision loss
-    //     );
-
-    //     // Now we swap
-    //     // We will swap 0.001 ether for tokens
-    //     // We should get 20% of 0.001 * 10**18 points
-    //     // = 2 * 10**14
-    //     swapRouter.swap{value: 0.001 ether}(
-    //         key,
-    //         IPoolManager.SwapParams({
-    //             zeroForOne: true,
-    //             amountSpecified: -0.001 ether,
-    //             sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
-    //         }),
-    //         PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
-    //         hookData
-    //     );
-
-    //     uint256 pointsBalanceAfterSwap = hook.balanceOf(address(this));
-
-    //     assertEq(pointsBalanceAfterSwap - pointsBalanceAfterAddLiquidity, 2 * 10 ** 14);
-    // }
-
-    // function test_addLiquidityAndSwapWithReferral() public {
-    //     bytes memory hookData = abi.encode(address(1), address(this));
-
-    //     uint256 pointsBalanceOriginal = hook.balanceOf(address(this));
-    //     uint256 referrerPointsBalanceOriginal = hook.balanceOf(address(1));
-
-    //     // amount0Delta = ~0.003 ETH
-    //     // How we landed on 0.003 ether here is based on computing value of x and y given
-    //     // total value of delta L (liquidity delta) = 1 ether
-    //     // This is done by computing x and y from the equation shown in Ticks and Q64.96 Numbers lesson
-    //     // View the full code for this lesson on GitHub which has additional comments
-    //     // showing the exact computation and a Python script to do that calculation for you
-
-    //     uint160 sqrtPriceAtTickLower = TickMath.getSqrtPriceAtTick(-60);
-    //     uint160 sqrtPriceAtTickUpper = TickMath.getSqrtPriceAtTick(60);
-
-    //     (uint256 amount0Delta, uint256 amount1Delta) =
-    //         LiquidityAmounts.getAmountsForLiquidity(SQRT_PRICE_1_1, sqrtPriceAtTickLower, sqrtPriceAtTickUpper, 1 ether);
-
-    //     modifyLiquidityRouter.modifyLiquidity{value: amount0Delta + 1}(
-    //         key,
-    //         IPoolManager.ModifyLiquidityParams({
-    //             tickLower: -60,
-    //             tickUpper: 60,
-    //             liquidityDelta: 1 ether,
-    //             salt: bytes32(0)
-    //         }),
-    //         hookData
-    //     );
-
-    //     uint256 pointsBalanceAfterAddLiquidity = hook.balanceOf(address(this));
-    //     uint256 referrerPointsBalanceAfterAddLiquidity = hook.balanceOf(address(1));
-
-    //     assertApproxEqAbs(pointsBalanceAfterAddLiquidity - pointsBalanceOriginal, 2995354955910434, 0.00001 ether);
-    //     assertApproxEqAbs(
-    //         referrerPointsBalanceAfterAddLiquidity - referrerPointsBalanceOriginal - hook.POINTS_FOR_REFERRAL(),
-    //         299535495591043,
-    //         0.000001 ether
-    //     );
-
-    //     // Now we swap
-    //     // We will swap 0.001 ether for tokens
-    //     // We should get 20% of 0.001 * 10**18 points
-    //     // = 2 * 10**14
-    //     // Referrer should get 10% of that - so 2 * 10**13
-    //     swapRouter.swap{value: 0.001 ether}(
-    //         key,
-    //         IPoolManager.SwapParams({
-    //             zeroForOne: true,
-    //             amountSpecified: -0.001 ether,
-    //             sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1
-    //         }),
-    //         PoolSwapTest.TestSettings({takeClaims: false, settleUsingBurn: false}),
-    //         hookData
-    //     );
-    //     uint256 pointsBalanceAfterSwap = hook.balanceOf(address(this));
-    //     uint256 referrerPointsBalanceAfterSwap = hook.balanceOf(address(1));
-
-    //     assertEq(pointsBalanceAfterSwap - pointsBalanceAfterAddLiquidity, 2 * 10 ** 14);
-    //     assertEq(referrerPointsBalanceAfterSwap - referrerPointsBalanceAfterAddLiquidity, 2 * 10 ** 13);
-    // }
 }
